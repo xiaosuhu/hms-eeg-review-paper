@@ -13,11 +13,11 @@ class Config2D:
     # ── Data paths ─────────────────────────────────────────────────────────
     spectrogram_dir: str = "train_spectrograms"   # dir containing {spec_id}.parquet
     metadata_csv: str    = "data_meta_splits/train_test_split.csv"
+    spec_cache_dir: str  = "/tmp/hms_spec_cache"  # pre-converted .npy files land here
 
-    # ── Spectrogram window ─────────────────────────────────────────────────
-    spec_window_seconds: int = 300   # seconds to extract around the label offset
-    img_height: int          = 128   # resize target H (freq axis)
-    img_width:  int          = 256   # resize target W (time axis)
+    # ── Spectrogram image dimensions ───────────────────────────────────────
+    img_height: int = 100   # freq bins per chain (4 chains stacked → 400 total rows)
+    img_width:  int = 300   # time columns per window (2-s resolution → 300 = 600 s)
 
     # ── Model ──────────────────────────────────────────────────────────────
     backbone:    str  = "efficientnet_b0"   # any timm model
