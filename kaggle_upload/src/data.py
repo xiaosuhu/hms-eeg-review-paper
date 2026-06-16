@@ -149,7 +149,8 @@ class EEGDatasetV2(Dataset):
         window = np.clip(window, -1024, 1024) / 32.0
 
         mu = 256
-        window = np.sign(window) * np.log(1 + mu * np.abs(window)) / np.log(1 + mu)
+        window = (np.sign(window) * np.log(1 + mu * np.abs(window))
+                  / np.log(mu + 1)).astype(np.float32)
 
         return {
             "x": window,
