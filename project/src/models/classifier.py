@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional
 
-from .backbones import TemporalCNN1D, ResNet1D, SmallCNN2D, EEGNet
+from .backbones import TemporalCNN1D, ResNet1D, ResNet1DGRU, SmallCNN2D, EEGNet
 from .heads import MLPHead, FusionConcatHead
 
 
@@ -20,6 +20,8 @@ class EEGClassifier(nn.Module):
             self.backbone = ResNet1D(in_channels=in_channels, feat_dim=feat_dim)
         elif backbone == "eegnet":
             self.backbone = EEGNet(in_channels=in_channels, dropout=backbone_dropout, feat_dim=feat_dim)
+        elif backbone == "resnet1d_gru":
+            self.backbone = ResNet1DGRU(in_channels=in_channels, feat_dim=feat_dim)
         else:
             raise ValueError(f"Unknown EEG backbone: {backbone}")
         self.head = MLPHead(in_dim=feat_dim, num_classes=num_classes, dropout=head_dropout)
@@ -138,6 +140,10 @@ def build_model(cfg: dict) -> nn.Module:
                              backbone_dropout=backbone_dropout, head_dropout=head_dropout)
     elif name == "eeg_1d_resnet":
         return EEGClassifier(num_classes=num_classes, backbone="resnet1d",
+                             feat_dim=feat_dim, in_channels=in_channels,
+                             backbone_dropout=backbone_dropout, head_dropout=head_dropout)
+    elif name == "eeg_1d_resnet_gru":
+        return EEGClassifier(num_classes=num_classes, backbone="resnet1d_gru",
                              feat_dim=feat_dim, in_channels=in_channels,
                              backbone_dropout=backbone_dropout, head_dropout=head_dropout)
     elif name == "spec_2d":

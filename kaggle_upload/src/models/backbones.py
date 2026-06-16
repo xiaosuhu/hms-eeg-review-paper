@@ -125,9 +125,9 @@ class EEGNet(nn.Module):
 
 # -------- Lightweight 1D ResNet-ish BACKBONE --------
 class ResidualBlock1D(nn.Module):
-    def __init__(self, in_ch, out_ch, stride=1, kernel_size=3, dilation=1):
+    def __init__(self, in_ch, out_ch, stride=1, kernel_size=3, dilation=1, padding=None):
         super().__init__()
-        pad = ((kernel_size - 1)//2) * dilation
+        pad = ((kernel_size - 1)//2) * dilation if padding is None else padding
         self.conv1 = nn.Conv1d(in_ch, out_ch, kernel_size, stride=stride, padding=pad, dilation=dilation, bias=False)
         self.bn1   = nn.BatchNorm1d(out_ch)
         self.conv2 = nn.Conv1d(out_ch, out_ch, kernel_size, stride=1, padding=pad, dilation=dilation, bias=False)
@@ -174,6 +174,83 @@ class ResNet1D(nn.Module):
         x = F.adaptive_avg_pool1d(x, 1).squeeze(-1)  # (B,256)
         z = self.proj(x)                # (B,feat_dim)
         return z
+
+
+class ResNet1DGRU(nn.Module):
+    """
+    Multi-scale parallel conv + ResNet blocks + parallel GRU branch.
+    Based on the 0.48 LB 1D EEG solution.
+    Input:  (B, in_channels, T)
+    Output: (B, feat_dim)
+    """
+    def __init__(self, in_channels=8, kernels=[3,5,7,9],
+                 planes=24, fixed_kernel_size=5,
+                 gru_hidden=128, feat_dim=256, num_resblocks=9):
+        super().__init__()
+        self.in_channels = in_channels
+        self.planes = planes
+
+        # Parallel multi-scale convs (one per kernel size)
+        self.parallel_conv = nn.ModuleList([
+            nn.Conv1d(in_channels, planes, kernel_size=k, stride=1, padding=0, bias=False)
+            for k in kernels
+        ])
+
+        self.bn1  = nn.BatchNorm1d(planes)
+        self.relu = nn.ReLU(inplace=False)
+
+        # Strided conv to compress after concat
+        self.conv1 = nn.Conv1d(planes, planes, fixed_kernel_size, stride=2, padding=2, bias=False)
+
+        # ResNet blocks
+        self.resblocks = nn.Sequential(*[
+            ResidualBlock1D(planes, planes, stride=1, kernel_size=fixed_kernel_size,
+                            padding=fixed_kernel_size // 2)
+            for _ in range(num_resblocks)
+        ])
+
+        self.bn2     = nn.BatchNorm1d(planes)
+        self.avgpool = nn.AvgPool1d(kernel_size=6, stride=6, padding=2)
+
+        # GRU branch on raw signal
+        self.gru = nn.GRU(input_size=in_channels, hidden_size=gru_hidden,
+                          num_layers=1, bidirectional=True, batch_first=True)
+
+        # Projection: CNN features + GRU last hidden (bidirectional → 2*gru_hidden)
+        with torch.no_grad():
+            dummy = torch.zeros(1, in_channels, 10000)
+            outs = [conv(dummy) for conv in self.parallel_conv]
+            out  = torch.cat(outs, dim=2)
+            out  = self.bn1(out); out = self.relu(out)
+            out  = self.conv1(out)
+            out  = self.resblocks(out)
+            out  = self.bn2(out); out = self.relu(out)
+            out  = self.avgpool(out)
+            cnn_out_dim = out.flatten(1).shape[1]
+        self.proj = nn.Linear(cnn_out_dim + 2 * gru_hidden, feat_dim)
+
+    def forward(self, x):
+        # x: (B, C, T)
+        # --- CNN branch ---
+        outs = [conv(x) for conv in self.parallel_conv]
+        out  = torch.cat(outs, dim=2)       # concat along time
+        out  = self.bn1(out)
+        out  = self.relu(out)
+        out  = self.conv1(out)
+        out  = self.resblocks(out)
+        out  = self.bn2(out)
+        out  = self.relu(out)
+        out  = self.avgpool(out)
+        cnn_feat = out.flatten(1)            # (B, planes * T')
+
+        # --- GRU branch ---
+        gru_in   = x.permute(0, 2, 1)       # (B, T, C)
+        _, h_n   = self.gru(gru_in)         # h_n: (2, B, gru_hidden)
+        gru_feat = h_n.permute(1, 0, 2).flatten(1)  # (B, 2*gru_hidden)
+
+        # --- Concat + project ---
+        combined = torch.cat([cnn_feat, gru_feat], dim=1)
+        return self.proj(combined)
 
 
 # -------- 2D CNN BACKBONE (Spectrogram) --------
