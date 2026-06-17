@@ -17,6 +17,38 @@ def butter_lowpass_filter(data, cutoff_freq=20, sampling_rate=200, order=4):
     filtered_data = lfilter(b, a, data, axis=0)
     return filtered_data
 
+VOTE_COLS = ['seizure_vote', 'lpd_vote', 'gpd_vote', 'lrda_vote', 'grda_vote', 'other_vote']
+
+
+def load_clean_data(path, split='trainval', fold=None):
+    """Load train_clean.csv and return the requested subset.
+
+    Parameters
+    ----------
+    path  : str  — path to train_clean.csv (one row per eeg_id, n_votes>=10)
+    split : 'trainval' | 'test' | 'all'
+    fold  : int 0-4  — if given, returns (train_df, val_df); ignored for 'test'/'all'
+
+    Returns
+    -------
+    If fold is None : a single DataFrame for the requested split.
+    If fold is int  : (train_df, val_df) where val_df is the held-out inner fold.
+    """
+    df = pd.read_csv(path)
+
+    if split == 'all':
+        subset = df
+    else:
+        subset = df[df['split'] == split].reset_index(drop=True)
+
+    if fold is None or split != 'trainval':
+        return subset
+
+    train_df = subset[subset['inner_fold'] != fold].reset_index(drop=True)
+    val_df   = subset[subset['inner_fold'] == fold].reset_index(drop=True)
+    return train_df, val_df
+
+
 def load_split_data(meta_path, fold=None):
     meta = pd.read_csv(meta_path)
     if fold is None:  # only test set
