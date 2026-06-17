@@ -4,10 +4,16 @@ deterministic: true
 
 # Data paths
 data:
-  train_meta: "data_meta_splits/train_test_split.csv"
-  val_meta:   "data_meta_splits/train_test_split.csv"
-  eeg_dir:    "data_eeg_preprocessed/eeg_npy"
-  spec_dir:   "data_eeg_preprocessed/spec_npy"
+  train_meta:  "data_meta_splits/train_test_split.csv"
+  val_meta:    "data_meta_splits/train_test_split.csv"
+  clean_meta:  "train_clean.csv"           # quality-filtered, one row per eeg_id
+  full_meta:   "train_test_split.csv"      # unfiltered 106 K rows
+  eeg_dir:     "data_eeg_preprocessed/eeg_npy"
+  spec_dir:    "data_eeg_preprocessed/spec_npy"
+  # Kaggle: /kaggle/input/hms-harmful-brain-activity-classification/train_eegs/
+  parquet_dir: "data_raw/train_eegs"
+  downsample:  5        # 10000 → 2000 time steps
+  use_lowpass: true
 
 # Model
 model:
@@ -36,6 +42,15 @@ train:
   early_stop_patience: 10
   early_stop_key: "macro_f1"
   lr_mode: "cos"
+  # Training condition: "clean" | "clean_weighted" | "two_step"
+  training_mode: "clean"
+
+# 2-step training parameters (used when training_mode == "two_step")
+two_step:
+  step1_epochs: 20      # pretrain on full 106 K rows
+  step2_epochs: 30      # finetune on clean 4,800 rows
+  step1_lr:     1.0e-3
+  step2_lr:     1.0e-4  # smaller LR for finetune
 
 log:
   use_wandb: false

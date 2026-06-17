@@ -19,6 +19,56 @@ def butter_lowpass_filter(data, cutoff_freq=20, sampling_rate=200, order=4):
 
 VOTE_COLS = ['seizure_vote', 'lpd_vote', 'gpd_vote', 'lrda_vote', 'grda_vote', 'other_vote']
 
+_CLASS_NAMES = {0: 'Seizure', 1: 'LPD', 2: 'GPD', 3: 'LRDA', 4: 'GRDA', 5: 'Other'}
+
+
+def get_sampler(df, label_col='label'):
+    """WeightedRandomSampler that up-weights minority classes.
+
+    Each sample receives weight = 1 / class_count so that every class
+    contributes equally in expectation over one epoch.
+
+    Parameters
+    ----------
+    df        : DataFrame with a column containing integer class labels
+    label_col : column name for the hard label (default 'label')
+
+    Returns
+    -------
+    torch.utils.data.WeightedRandomSampler
+    """
+    from torch.utils.data import WeightedRandomSampler
+
+    labels = df[label_col].values.astype(int)
+    class_counts = np.bincount(labels, minlength=6).astype(np.float64)
+    class_counts = np.where(class_counts == 0, 1.0, class_counts)  # avoid /0
+    class_weights = 1.0 / class_counts
+    sample_weights = class_weights[labels]
+
+    return WeightedRandomSampler(
+        weights=torch.from_numpy(sample_weights).float(),
+        num_samples=len(sample_weights),
+        replacement=True,
+    )
+
+
+def load_full_data(path, split='trainval'):
+    """Load train_test_split.csv (full, unfiltered) for the requested split.
+
+    Parameters
+    ----------
+    path  : str — path to train_test_split.csv
+    split : 'trainval' | 'test' | 'all'
+
+    Returns
+    -------
+    DataFrame
+    """
+    df = pd.read_csv(path)
+    if split == 'all':
+        return df
+    return df[df['split'] == split].reset_index(drop=True)
+
 
 def load_clean_data(path, split='trainval', fold=None):
     """Load train_clean.csv and return the requested subset.
