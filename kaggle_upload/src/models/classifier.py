@@ -12,7 +12,7 @@ class EEGClassifier(nn.Module):
     """
     Expects EEG input (B, C, T). Returns logits (B, num_classes).
     """
-    def __init__(self, num_classes: int, backbone: str = "temporal_cnn", feat_dim: int = 256, in_channels: int = 20, backbone_dropout: float = 0.0, head_dropout: float = 0.1):
+    def __init__(self, num_classes: int, backbone: str = "temporal_cnn", feat_dim: int = 256, in_channels: int = 20, backbone_dropout: float = 0.0, head_dropout: float = 0.1, input_T: int = 2000):
         super().__init__()
         if backbone == "temporal_cnn":
             self.backbone = TemporalCNN1D(in_channels=in_channels, feat_dim=feat_dim, dropout=backbone_dropout)
@@ -21,7 +21,7 @@ class EEGClassifier(nn.Module):
         elif backbone == "eegnet":
             self.backbone = EEGNet(in_channels=in_channels, dropout=backbone_dropout, feat_dim=feat_dim)
         elif backbone == "resnet1d_gru":
-            self.backbone = ResNet1DGRU(in_channels=in_channels, feat_dim=feat_dim)
+            self.backbone = ResNet1DGRU(in_channels=in_channels, feat_dim=feat_dim, input_T=input_T)
         else:
             raise ValueError(f"Unknown EEG backbone: {backbone}")
         self.head = MLPHead(in_dim=feat_dim, num_classes=num_classes, dropout=head_dropout)
@@ -145,7 +145,8 @@ def build_model(cfg: dict) -> nn.Module:
     elif name == "eeg_1d_resnet_gru":
         return EEGClassifier(num_classes=num_classes, backbone="resnet1d_gru",
                              feat_dim=feat_dim, in_channels=in_channels,
-                             backbone_dropout=backbone_dropout, head_dropout=head_dropout)
+                             backbone_dropout=backbone_dropout, head_dropout=head_dropout,
+                             input_T=cfg.get("input_T", 2000))
     elif name == "spec_2d":
         return SpecClassifier(num_classes=num_classes, backbone="smallcnn2d",
                               feat_dim=feat_dim, in_channels=cfg.get("spec_in_channels", 3))

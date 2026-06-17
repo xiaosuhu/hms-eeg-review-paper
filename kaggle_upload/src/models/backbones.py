@@ -185,7 +185,8 @@ class ResNet1DGRU(nn.Module):
     """
     def __init__(self, in_channels=8, kernels=[3,5,7,9],
                  planes=24, fixed_kernel_size=5,
-                 gru_hidden=128, feat_dim=256, num_resblocks=9):
+                 gru_hidden=128, feat_dim=256, num_resblocks=9,
+                 input_T=2000):
         super().__init__()
         self.in_channels = in_channels
         self.planes = planes
@@ -218,7 +219,7 @@ class ResNet1DGRU(nn.Module):
 
         # Projection: CNN features + GRU last hidden (bidirectional → 2*gru_hidden)
         with torch.no_grad():
-            dummy = torch.zeros(1, in_channels, 10000)
+            dummy = torch.zeros(1, in_channels, input_T)
             outs = [conv(dummy) for conv in self.parallel_conv]
             out  = torch.cat(outs, dim=2)
             out  = self.bn1(out); out = self.relu(out)
