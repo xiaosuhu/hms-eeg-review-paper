@@ -14,7 +14,7 @@ import yaml
 import torch
 from torch.utils.data import DataLoader
 
-from project.src.data import EEGDataset
+from project_local_run.src.data import EEGDataset
 
 
 def main():
