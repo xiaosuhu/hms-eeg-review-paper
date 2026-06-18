@@ -85,17 +85,19 @@ class SpectrogramDataset(Dataset):
     split           : "train" | "val" | "all"
     """
 
-    def __init__(self, metadata_csv: str, spectrogram_dir: str, cfg, split: str = "train"):
-        meta = pd.read_csv(metadata_csv)
-        meta = meta[meta["split"] == "trainval"].reset_index(drop=True)
+    def __init__(self, metadata, spectrogram_dir: str, cfg, split: str = "train"):
+        if isinstance(metadata, pd.DataFrame):
+            meta = metadata.reset_index(drop=True)
+        else:
+            meta = pd.read_csv(metadata)
+            meta = meta[meta["split"] == "trainval"].reset_index(drop=True)
+            if split == "train":
+                meta = meta[meta["inner_fold"] != cfg.val_fold].reset_index(drop=True)
+            elif split == "val":
+                meta = meta[meta["inner_fold"] == cfg.val_fold].reset_index(drop=True)
+            # "all" keeps everything
 
-        if split == "train":
-            meta = meta[meta["inner_fold"] != cfg.val_fold].reset_index(drop=True)
-        elif split == "val":
-            meta = meta[meta["inner_fold"] == cfg.val_fold].reset_index(drop=True)
-        # "all" keeps everything
-
-        self.meta          = meta
+        self.meta           = meta
         self.spec_cache_dir = cfg.spec_cache_dir
 
         # pre-compute soft labels
