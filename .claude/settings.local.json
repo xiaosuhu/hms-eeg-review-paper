@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(conda env *)",
+      "Bash(python3 *)",
+      "Bash(awk 'NR>=134' /media/frank/Franknano/Python_Project/HMS_EEG/project/src/data.py)",
+      "Bash(awk '/^class /{if\\(NR>1\\)exit} {print NR+133, $0}')",
+      "Bash(python dataset_2d.py)",
+      "Bash(conda run *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Read(//home/frank/.local/lib/**)",
+      "Bash(conda info *)",
+      "Bash(/home/frank/miniconda3/envs/hms_eeg/bin/python *)"
+    ]
+  }
+}
