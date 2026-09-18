@@ -1,5 +1,4 @@
 data_eeg_preprocessed/
-data_meta_splits/
 *.npy
 *.parquet
 runs/
