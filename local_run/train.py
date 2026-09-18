@@ -9,11 +9,11 @@ from torch.cuda.amp import autocast, GradScaler
 from torch.utils.data import DataLoader, WeightedRandomSampler
 from torch.optim.lr_scheduler import LambdaLR
 
-from project_local_run.src.utils import set_seed, get_lr_lambda
-from project_local_run.src.data import EEGDataset
-from project_local_run.src.models.classifier import build_model
-from project_local_run.src.losses import build_loss
-from project_local_run.src.evaluation import validate
+from local_run.src.utils import set_seed, get_lr_lambda
+from local_run.src.data import EEGDataset
+from local_run.src.models.classifier import build_model
+from local_run.src.losses import build_loss
+from local_run.src.evaluation import validate
 
 def load_cfg(path: str):
     with open(path, "r") as f:
