@@ -44,7 +44,15 @@ def validate(model: nn.Module,
              loader: torch.utils.data.DataLoader,
              loss_fn: nn.Module,
              cfg: dict,
-             device: torch.device):
+             device: torch.device,
+             soft_key: str | None = None):
+    """
+    soft_key: optional key holding the target probability distribution
+              (e.g. "soft_y" for EEGDatasetV2, whose "y" is always a hard label).
+              When given, KL is computed against batch[soft_key] instead of a
+              one-hot of batch["y"]; batch["y"] is still used for accuracy/F1.
+              When omitted, behaviour is unchanged (backward compatible).
+    """
     model.eval()
     total_loss = 0.0
     all_probs, all_y_true = [], []
@@ -59,11 +67,16 @@ def validate(model: nn.Module,
         logits = model(x)
 
         if use_kl:
-            # KL expects probs as targets; accept either ints or probs from dataset
-            if y.ndim == 1:
+            # KL expects probs as targets; prefer the dataset's soft-label key,
+            # else accept either ints or probs from the "y" field
+            if soft_key is not None and soft_key in batch:
+                y_probs = batch[soft_key].to(device, non_blocking=True).float()
+            elif y.ndim == 1:
                 y_probs = _one_hot(y.long(), num_classes, cfg["loss"].get("label_smoothing", 0.0))
             else:
                 y_probs = y
+            # loss_fn must be a KLLoss from build_loss() — it applies log_softmax
+            # internally, so raw logits are passed here on purpose.
             loss = loss_fn(logits, y_probs)
             probs = torch.softmax(logits, dim=1)
             y_true = y.argmax(dim=1) if y.ndim == 2 else y.long()
