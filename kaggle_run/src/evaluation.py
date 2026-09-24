@@ -45,13 +45,19 @@ def validate(model: nn.Module,
              loss_fn: nn.Module,
              cfg: dict,
              device: torch.device,
-             soft_key: str | None = None):
+             soft_key: str | None = None,
+             x_key: str = "x",
+             y_key: str = "y"):
     """
     soft_key: optional key holding the target probability distribution
               (e.g. "soft_y" for EEGDatasetV2, whose "y" is always a hard label).
               When given, KL is computed against batch[soft_key] instead of a
               one-hot of batch["y"]; batch["y"] is still used for accuracy/F1.
               When omitted, behaviour is unchanged (backward compatible).
+    x_key/y_key: batch dict keys for the input tensor and hard label, for
+                 datasets that don't use EEGDatasetV2's "x"/"y" naming (e.g.
+                 SpectrogramDataset uses "image"/"label"). Default to "x"/"y"
+                 so existing callers are unaffected.
     """
     model.eval()
     total_loss = 0.0
@@ -61,8 +67,8 @@ def validate(model: nn.Module,
     num_classes = cfg["model"]["num_classes"]
 
     for batch in loader:
-        x = batch["x"].to(device, non_blocking=True)
-        y = batch["y"].to(device, non_blocking=True)
+        x = batch[x_key].to(device, non_blocking=True)
+        y = batch[y_key].to(device, non_blocking=True)
 
         logits = model(x)
 
