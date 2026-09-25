@@ -8,6 +8,7 @@ from torch.utils.data import Dataset, DataLoader
 from itertools import cycle
 import matplotlib.pyplot as plt
 from scipy.signal import butter, lfilter
+from joblib import Parallel, delayed
 
 
 def butter_lowpass_filter(data, cutoff_freq=20, sampling_rate=200, order=4):
@@ -191,14 +192,85 @@ class EEGDataset(Dataset):
                 nan_count += 1
         return nan_count, n
 
+def _crop_montage_encode(eeg_raw, window_len=10000):
+    """Shared core of EEGDatasetV2's preprocessing: center-crop the raw [T, 20]
+    parquet array to window_len rows, build the 8 bipolar channels, clip+scale,
+    and mu-law encode. Returns a [8, window_len] float32 array.
+
+    Used both by EEGDatasetV2.__getitem__ (uncached path) and by
+    preprocess_eeg_windows (cache-builder), so the two never diverge.
+    """
+    rows = len(eeg_raw)
+    offset = (rows - window_len) // 2
+    eeg = eeg_raw[offset:offset + window_len]  # [window_len, 20]
+    eeg = eeg.T                                 # [20, window_len]
+
+    # 8 bipolar channels — same pairs and column indices as EEGDataset
+    window = np.stack([
+        eeg[0]  - eeg[5],   # Fp1-T3
+        eeg[5]  - eeg[7],   # T3-O1
+        eeg[0]  - eeg[2],   # Fp1-C3
+        eeg[2]  - eeg[7],   # C3-O1
+        eeg[11] - eeg[13],  # Fp2-C4
+        eeg[13] - eeg[18],  # C4-O2
+        eeg[11] - eeg[16],  # Fp2-T4
+        eeg[16] - eeg[18],  # T4-O2
+    ], axis=0)  # [8, window_len]
+
+    window = window.astype(np.float32)
+    window = np.nan_to_num(window, nan=0.0, posinf=0.0, neginf=0.0)
+    window = np.clip(window, -1024, 1024) / 32.0
+
+    mu = 256
+    window = (np.sign(window) * np.log(1 + mu * np.abs(window))
+              / np.log(mu + 1)).astype(np.float32)
+    return window
+
+
+def _preprocess_one_eeg(eeg_id, parquet_dir, cache_dir, window_len):
+    dst = os.path.join(cache_dir, f"{eeg_id}.npy")
+    if os.path.exists(dst):
+        return
+    src = os.path.join(parquet_dir, f"{eeg_id}.parquet")
+    eeg_raw = pd.read_parquet(src).values.astype(np.float32)  # [T, 20]
+    window = _crop_montage_encode(eeg_raw, window_len)
+    np.save(dst, window)
+
+
+def preprocess_eeg_windows(df, parquet_dir, cache_dir, window_len=10000, n_jobs=4):
+    """Convert every unique eeg_id in df to a cached {eeg_id}.npy of shape
+    (8, window_len), mirroring dataset_2d.py's preprocess_spectrograms().
+
+    Caching is keyed by eeg_id (not by row) because EEGDatasetV2's center-crop
+    window depends only on the source parquet file, not on any per-row offset
+    column — so rows that share an eeg_id would otherwise redundantly re-read
+    and re-process the exact same file/window. Skips eeg_ids already cached.
+    """
+    os.makedirs(cache_dir, exist_ok=True)
+    eeg_ids = df['eeg_id'].astype(int).unique().tolist()
+    Parallel(n_jobs=n_jobs, verbose=1)(
+        delayed(_preprocess_one_eeg)(eid, parquet_dir, cache_dir, window_len)
+        for eid in eeg_ids
+    )
+    print(f"Preprocessed {len(eeg_ids)} unique EEGs -> {cache_dir}")
+
+
 class EEGDatasetV2(Dataset):
     """EEG dataset with GroupKFold-friendly interface: accepts a pre-split df,
-    uses center crop, clip+scale, and mu-law encoding instead of z-score."""
+    uses center crop, clip+scale, and mu-law encoding instead of z-score.
 
-    def __init__(self, df, parquet_dir, window_len=10000):
+    If cache_dir is given and preprocess_eeg_windows() has populated it,
+    __getitem__ loads the cached {eeg_id}.npy directly instead of re-reading
+    and re-processing the source parquet. Falls back to the parquet path when
+    cache_dir is None or the file is missing, so this stays backward
+    compatible with callers that don't opt into caching.
+    """
+
+    def __init__(self, df, parquet_dir, window_len=10000, cache_dir=None):
         self.data = df.reset_index(drop=True)
         self.parquet_dir = parquet_dir
         self.window_len = window_len
+        self.cache_dir = cache_dir
 
     def __len__(self):
         return len(self.data)
@@ -207,32 +279,13 @@ class EEGDatasetV2(Dataset):
         row = self.data.iloc[idx]
         eeg_id = int(row['eeg_id'])
 
-        fpath = os.path.join(self.parquet_dir, f"{eeg_id}.parquet")
-        eeg = pd.read_parquet(fpath).values.astype(np.float32)  # [T, 20]
-        rows = len(eeg)
-        offset = (rows - self.window_len) // 2
-        eeg = eeg[offset:offset + self.window_len]  # [10000, 20]
-        eeg = eeg.T                                  # [20, 10000]
-
-        # 8 bipolar channels — same pairs and column indices as EEGDataset
-        window = np.stack([
-            eeg[0]  - eeg[5],   # Fp1-T3
-            eeg[5]  - eeg[7],   # T3-O1
-            eeg[0]  - eeg[2],   # Fp1-C3
-            eeg[2]  - eeg[7],   # C3-O1
-            eeg[11] - eeg[13],  # Fp2-C4
-            eeg[13] - eeg[18],  # C4-O2
-            eeg[11] - eeg[16],  # Fp2-T4
-            eeg[16] - eeg[18],  # T4-O2
-        ], axis=0)  # [8, 10000]
-
-        window = window.astype(np.float32)
-        window = np.nan_to_num(window, nan=0.0, posinf=0.0, neginf=0.0)
-        window = np.clip(window, -1024, 1024) / 32.0
-
-        mu = 256
-        window = (np.sign(window) * np.log(1 + mu * np.abs(window))
-                  / np.log(mu + 1)).astype(np.float32)
+        cache_path = os.path.join(self.cache_dir, f"{eeg_id}.npy") if self.cache_dir else None
+        if cache_path is not None and os.path.exists(cache_path):
+            window = np.load(cache_path)
+        else:
+            fpath = os.path.join(self.parquet_dir, f"{eeg_id}.parquet")
+            eeg_raw = pd.read_parquet(fpath).values.astype(np.float32)  # [T, 20]
+            window = _crop_montage_encode(eeg_raw, self.window_len)
 
         return {
             "x": window,
