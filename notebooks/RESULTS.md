@@ -27,7 +27,6 @@ Each notebook prints its row in this format in its final cell:
 | cnn-1d-v7b-weighted-sampler.ipynb | 5b17af5 | 0.9234 | 0.2144 | (prior session) | Step 2b reweighting, best-KL anchor |
 | cnn-1d-v8-two-step.ipynb | 5b17af5 | 1.0826 | 0.2216 | (prior session) | Step 2c two-step, best-KL anchor (Step2, epoch 30) |
 | cnn-1d-v8c-weighted-two-step.ipynb | 5b17af5 | 1.1426 | 0.2028 | (prior session) | Step 2d, best-KL anchor (Step2, epoch 24) |
-| cnn-2d-v1-baseline.ipynb | 9c090b3 | 0.6993 | 0.4766 | 2026-09-29 | 2D baseline, best-KL anchor |
 | cnn-2d-v3-efficientnet.ipynb | 9c090b3 | 0.6402 | 0.4787 | 2026-09-29 | 2D EfficientNet-B0, best-KL anchor |
 | cnn-2d-v4-two-step.ipynb | 5b17af5 | 0.4879 | 0.5317 | 2026-09-29 | 2D two-step, Step2 best-KL anchor |
 | xgboost-v3-clean-data.ipynb | 5b17af5 | 0.8409 | 0.2002 | 2026-09-29 | XGBoost clean baseline |
@@ -130,41 +129,37 @@ whether Bhatti et al.'s stage order is common among top solutions, not
 an isolated choice) before deciding whether it's worth a dedicated
 follow-up experiment.
 
-## 2D CNN (EfficientNet-B0) — baseline / same-architecture check / two-step
+## 2D CNN (EfficientNet-B0) — single-step baseline / two-step
 
-All three notebooks (v1, v3, v4) are scored against the same shared
+Both notebooks (v3, v4) are scored against the same shared
 clean 1,139-row test split used everywhere else in this ablation
 (`load_clean_data(CLEAN_PATH, split='test')`) as of commit `9c090b3`.
-v1 and v3 both train on the full ~83K-row noisy trainval split in a
-single step; v4 trains in two steps (Step1: full noisy data, Step2:
-finetune on the clean 4,800-row subset). v1 and v3 use the identical
-underlying architecture (`EfficientNetEEG`, backbone=`efficientnet_b0`)
-and near-identical training code — v3 exists as an independent
-cross-check of v1, written separately; the two notebooks' numbers
-should be read as a consistency check on each other, not as two
-different conditions.
+v3 is the single-step full-noisy baseline: it trains on the full
+~83K-row noisy trainval split in a single step
+(`EfficientNetEEG`, backbone=`efficientnet_b0`, `grad_clip=1.0`,
+consistent with v4). v4 trains in two steps (Step1: full noisy data,
+Step2: finetune on the clean 4,800-row subset).
 
 | condition | notebook | best-KL epoch (kl / f1) | best-F1 epoch (kl / f1) | curve shape |
 |---|---|---|---|---|
-| Baseline (single-step, full data) | cnn-2d-v1-baseline.ipynb | 1 (0.6993 / 0.4766) | 8 (0.9631 / 0.4889) | val_kl rises with noise after ep1 (+68% by ep11); early-stopped ep11 |
-| Same architecture, independent run | cnn-2d-v3-efficientnet.ipynb | 1 (0.6402 / 0.4787) | 1 (same as best-KL) | rises with noise after ep1 (+92% by ep11); early-stopped ep11 |
+| Baseline (single-step, full noisy data) | cnn-2d-v3-efficientnet.ipynb | 1 (0.6402 / 0.4787) | 1 (same as best-KL) | rises with noise after ep1 (+92% by ep11); early-stopped ep11 |
 | Two-step — Step1 (full-data pretrain) | cnn-2d-v4-two-step.ipynb | 2 (0.6868 / 0.5085) | 2 (same as best-KL) | rises with noise after ep2 (+79% by ep12); early-stopped ep12 |
-| Two-step — Step2 (clean-data finetune) | cnn-2d-v4-two-step.ipynb | 2 (0.4879 / 0.5317) | 6 (0.5148 / 0.5386) | rises gently after ep2 (+13% by ep12) — much milder than the other three rows; early-stopped ep12 |
+| Two-step — Step2 (clean-data finetune) | cnn-2d-v4-two-step.ipynb | 2 (0.4879 / 0.5317) | 6 (0.5148 / 0.5386) | rises gently after ep2 (+13% by ep12) — much milder than the other two rows; early-stopped ep12 |
 
-**Interpretation**: the single-step baseline (v1), its independent
-cross-check (v3), and even Step1 of the two-step run (v4, which is
-architecturally identical single-step training on the same full data)
-all show the same failure mode as 1D's Step 2a: an early best-KL epoch
-followed by a noisy but net-rising val_kl. Two-step's Step2 (v4) is the
-best performer on both metrics of the four rows (lowest val_kl, highest
+**Interpretation**: the single-step full-noisy baseline (v3), and even
+Step1 of the two-step run (v4, which is architecturally identical
+single-step training on the same full data), both show the same
+failure mode as 1D's Step 2a: an early best-KL epoch followed by a
+noisy but net-rising val_kl. Two-step's Step2 (v4) is the
+best performer on both metrics of the three rows (lowest val_kl, highest
 best-F1-anchor macro_f1), and its post-optimum rise is far gentler
-(+13%) than the other three (+68% to +92%) — but unlike 1D's Step 2c,
+(+13%) than the other two (+79% for v4 Step1 to +92% for v3) — but unlike 1D's Step 2c,
 it does **not** fully eliminate the divergence: the best-KL epoch is 2
 of 12, not the last epoch. The correct claim for 2D is therefore
 "two-step substantially reduces, but does not eliminate, the
 early-divergence failure mode" — a weaker but still directionally
 consistent version of the 1D finding. One candidate (untested)
-explanation for the weaker effect: v1/v3/v4-Step1 all fine-tune the
+explanation for the weaker effect: v3/v4-Step1 both fine-tune the
 full pretrained EfficientNet-B0 at a constant `lr=1e-3` with a cosine
 schedule that has barely decayed by the early-stopping point (~epoch
 11-12 of a 50-epoch `T_max`), whereas 1D's v8/v8c use a markedly
@@ -224,3 +219,15 @@ dataset each round, while the CNN notebooks' `val_kl` targets a noisy
 *soft* multi-rater label distribution using mini-batch SGD/AdamW —
 both the loss target and the optimizer's stochasticity differ, and
 both plausibly contribute to the smoother XGBoost curves.
+
+## Pending runs (not yet executed)
+
+Five notebooks completing the Section 4 ablation matrix. No results yet.
+
+| notebook | condition | base notebook | single change |
+|---|---|---|---|
+| cnn-2d-v5-clean-data.ipynb | 2D, clean-only, single-step | cnn-2d-v3-efficientnet.ipynb | train on `load_clean_data(..., split='trainval')` (4,800 rows) instead of the full noisy trainval split |
+| cnn-2d-v5b-weighted-sampler.ipynb | 2D, clean + class-balanced sampler | cnn-2d-v5-clean-data.ipynb | `get_sampler(train_df, label_col='label')` + `DataLoader(sampler=...)` (no `shuffle`) |
+| cnn-1d-v7c-full-noisy.ipynb | 1D, full noisy data, single-step | cnn-1d-v7-clean-data.ipynb | train on `load_full_data(..., split='trainval')` (~83K rows) instead of the clean 4,800 rows |
+| cnn-1d-v7d-clean-lr1e-5.ipynb | 1D control: from scratch, clean-only, Step2-style optimization | cnn-1d-v7-clean-data.ipynb | local override `LR=1e-5`, `NUM_EPOCHS=30` (cosine `T_max=30`), `patience=15`; no pretraining |
+| xgboost-v5-full-noisy.ipynb | XGBoost, full noisy data | xgboost-v3-clean-data.ipynb | train on `load_full_data(..., split='trainval')` instead of the clean set (features extracted once per unique `eeg_id`) |
