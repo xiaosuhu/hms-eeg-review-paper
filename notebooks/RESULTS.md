@@ -31,12 +31,34 @@ Each notebook prints its row in this format in its final cell:
 | cnn-2d-v4-two-step.ipynb | 5b17af5 | 0.4879 | 0.5317 | 2026-09-29 | 2D two-step, Step2 best-KL anchor |
 | xgboost-v3-clean-data.ipynb | 5b17af5 | 0.8409 | 0.2002 | 2026-09-29 | XGBoost clean baseline |
 | xgboost-v4-sample-weight.ipynb | 5b17af5 | 0.8938 | 0.2676 | 2026-09-29 | XGBoost + sample_weight |
+| cnn-2d-v5-clean-data.ipynb | d4bfcd6 | 0.4794 | 0.5197 | 2026-10-05 | 2D clean-only, single-step (epoch 6) |
+| cnn-2d-v5b-weighted-sampler.ipynb | d4bfcd6 | 0.5131 | 0.4657 | 2026-10-05 | 2D clean + class-balanced sampler (epoch 12) |
+| cnn-1d-v7c-full-noisy.ipynb | d4bfcd6 | 1.0938 | 0.2266 | (not recorded) | 1D full noisy, single-step (epoch 1) |
+| cnn-1d-v7d-clean-lr1e-5.ipynb | d4bfcd6 | 0.9016 | 0.1151 | (not recorded) | 1D control: from scratch, clean-only, lr 1e-5 (epoch 29) |
+| xgboost-v5-full-noisy.ipynb | d4bfcd6 | 0.9964 | 0.2782 | (not recorded) | XGBoost full noisy, best round 132 |
 
-- cnn-2d-v1-baseline.ipynb and cnn-2d-v3-efficientnet.ipynb were originally
-  scored against a different, non-comparable validation set (an inner fold
-  of the full noisy `train_test_split.csv`, not the shared clean test
-  split) until commit `9c090b3` fixed this. **Any v1/v3 numbers recorded
+All rows are seed 42 (single run); multi-seed reruns (43, 44) are pending.
+
+- cnn-2d-v3-efficientnet.ipynb was originally scored against a different,
+  non-comparable validation set (an inner fold of the full noisy
+  `train_test_split.csv`, not the shared clean test split) until commit
+  `9c090b3` fixed this. (cnn-2d-v1-baseline.ipynb, which had the same
+  problem, was retired and moved to `old_ver/`.) **Any v3 numbers recorded
   before `9c090b3` are invalid and must not be reused.**
+
+## Reference baselines (no model)
+
+A constant prediction equal to the mean soft label of the trainval rows,
+scored with the same KL (probabilities clipped at 1e-7).
+
+| test set | clean-train prior | full-train prior | uniform |
+|---|---|---|---|
+| clean test (n=1,139) KL | 0.8748 | 1.0882 | 1.136 |
+| clean test macro-F1 | 0.1112 (equals always predicting "other") | n/a | n/a |
+| non-clean test (n=14,863) KL | 2.0521 | 1.5336 | 1.5621 |
+
+clean-train prior = mean soft label of the 4,800 clean trainval rows;
+full-train prior = mean over the 83,430 trainval rows.
 
 Note: for the 2D notebooks, `validate()` is called with
 `soft_key="soft_label", x_key="image", y_key="label"` — `SpectrogramDataset`
@@ -74,7 +96,6 @@ within the first 1-2 epochs and then rise almost monotonically for the rest
 of training — there is no later, better-trained checkpoint to select instead.
 Two-step training (v8, v8c) shows the opposite pattern: val_kl in Step2
 improves gradually and continuously across all 30 epochs with no divergence.
-This asymmetry is itself the mechanistic finding — see note below the table.
 
 Each row reports two anchors: the epoch with lowest val_kl, and the epoch
 with highest macro_f1 (often different epochs, since KL and F1 diverge).
@@ -85,17 +106,15 @@ with highest macro_f1 (often different epochs, since KL and F1 diverge).
 | Step 2b (reweighting) | cnn-1d-v7b-weighted-sampler.ipynb | 2 (0.9234 / 0.2144) | 10 (1.2483 / 0.2489) | same rising pattern after ep2; early-stopped ep12 |
 | Step 2c (two-step) | cnn-1d-v8-two-step.ipynb | 30 (1.0826 / 0.2216) | 1 (1.2017 / 0.2417) | val_kl improves gradually across all 30 Step2 epochs, no divergence |
 | Step 2d (two-step + Step1 reweight) | cnn-1d-v8c-weighted-two-step.ipynb | 24 (1.1426 / 0.2028) | 1 (1.1768 / 0.2366) | same gradual-improvement pattern as 2c; final numbers slightly worse than 2c |
+| Full noisy, single-step | cnn-1d-v7c-full-noisy.ipynb | 1 (1.0938 / 0.2266) | 5 (1.3108 / 0.2448) | val_kl rises after epoch 1, peaks at epoch 6 (1.6074, +47% over best), ends epoch 11 at 1.2494 / 0.2281 (+14.2%); early-stopped ep11 |
+| Control: from scratch, clean-only, lr 1e-5, 30 epochs | cnn-1d-v7d-clean-lr1e-5.ipynb | 29 (0.9016 / 0.1151) | 1 (1.0504 / 0.1289) | slow monotone-ish decrease, ends epoch 30 at 0.9028 / 0.1150 (+0.1% over best); F1 stays 0.112-0.129 |
 
-**Interpretation**: v7/v7b's low best-KL numbers (0.92) come from checkpoints
-epochs into training that are still largely undertrained (macro_f1 0.13-0.21) —
-not representative of a usable model. v8/v8c never hit this failure mode: their
-Step2 val_kl keeps improving for the full 30-epoch budget. This is the paper's
-central mechanistic claim in action — separating noisy-but-large pretraining
-from clean-but-small finetuning changes the *optimization dynamics* of the
-finetune phase, not just its data distribution. Step1 reweighting (2d vs 2c)
-does not add benefit on top of this — 2c's Step2 outperforms 2d's Step2 on
-both final metrics, a negative result worth reporting as-is: the benefit of
-two-step training comes from the clean/noisy split, not from reweighting.
+**Interpretation (revised after the v7c and v7d runs; seed 42, single run each).**
+(1) KL is at prior level. On the clean test split, a constant prediction of the clean-train mean soft label scores KL 0.8748 (see Reference baselines). Every 1D row (0.90-1.14) is at or above that value, so KL differences between 1D conditions do not indicate differences in learned skill. Macro-F1 is the more informative 1D metric: 0.115-0.13 for from-scratch clean-only runs (v7, v7d), 0.21 with reweighting (v7b), and 0.20-0.25 for runs that saw the full noisy data (v7c, v8, v8c).
+(2) Absence of divergence is a learning-rate effect, not a pretraining effect. v7d (no pretraining, clean-only, lr 1e-5, 30 epochs) shows no divergence (final epoch +0.1% over best), as v8/v8c do. The earlier reading that two-step training changes the finetune-phase optimization dynamics is therefore withdrawn: the same curve shape is reproduced by the small learning rate alone.
+(3) What pretraining supplies is F1, not KL: at the same Step 2 setting, macro-F1 goes from 0.115 (v7d) to 0.22 (v8), while best KL goes from 0.9016 to 1.0826.
+(4) Full-noisy single-step training (v7c) shows the same early-best-then-drift shape as the 2D full-noisy baseline.
+(5) Step 1 reweighting (2d vs 2c) adds no benefit: 2c's Step 2 outperforms 2d's on both final metrics.
 
 Absolute KL values here (~0.92-1.6) are well above top Kaggle solutions
 (Bhatti et al., arXiv:2412.07878, report KL ≈ 0.24 for Multi-Stage TinyViT
@@ -131,43 +150,47 @@ follow-up experiment.
 
 ## 2D CNN (EfficientNet-B0) — single-step baseline / two-step
 
-Both notebooks (v3, v4) are scored against the same shared
-clean 1,139-row test split used everywhere else in this ablation
+Notebooks v3, v5, v5b and v4 are all scored on the same shared clean
+1,139-row test split used everywhere else in this ablation
 (`load_clean_data(CLEAN_PATH, split='test')`) as of commit `9c090b3`.
-v3 is the single-step full-noisy baseline: it trains on the full
-~83K-row noisy trainval split in a single step
-(`EfficientNetEEG`, backbone=`efficientnet_b0`, `grad_clip=1.0`,
-consistent with v4). v4 trains in two steps (Step1: full noisy data,
-Step2: finetune on the clean 4,800-row subset).
+v3 trains on the full noisy trainval split (~83K rows, single step;
+`EfficientNetEEG`, backbone=`efficientnet_b0`, `grad_clip=1.0`,
+consistent with v4); v5 and v5b train on the 4,800-row clean trainval
+split; v4 trains on the full noisy data first (Step1), then finetunes on
+the clean subset (Step2).
 
-| condition | notebook | best-KL epoch (kl / f1) | best-F1 epoch (kl / f1) | curve shape |
-|---|---|---|---|---|
-| Baseline (single-step, full noisy data) | cnn-2d-v3-efficientnet.ipynb | 1 (0.6402 / 0.4787) | 1 (same as best-KL) | rises with noise after ep1 (+92% by ep11); early-stopped ep11 |
-| Two-step — Step1 (full-data pretrain) | cnn-2d-v4-two-step.ipynb | 2 (0.6868 / 0.5085) | 2 (same as best-KL) | rises with noise after ep2 (+79% by ep12); early-stopped ep12 |
-| Two-step — Step2 (clean-data finetune) | cnn-2d-v4-two-step.ipynb | 2 (0.4879 / 0.5317) | 6 (0.5148 / 0.5386) | rises gently after ep2 (+13% by ep12) — much milder than the other two rows; early-stopped ep12 |
+| condition | notebook | best-KL epoch (kl / f1) | best-F1 epoch (kl / f1) | final epoch (kl / f1) | best->last KL drift |
+|---|---|---|---|---|---|
+| Full noisy, single-step | cnn-2d-v3-efficientnet.ipynb | 1 (0.6402 / 0.4787) | 1 (same) | ep11 (1.2302 / 0.4554) | +92% |
+| Clean-only, single-step | cnn-2d-v5-clean-data.ipynb | 6 (0.4794 / 0.5197) | 6 (same) | ep16 (0.5685 / 0.4245) | +18.6% |
+| Clean + class-balanced sampler | cnn-2d-v5b-weighted-sampler.ipynb | 12 (0.5131 / 0.4657) | 5 (0.5793 / 0.5005) | ep22 (0.5884 / 0.4207) | +14.7% |
+| Two-step, Step 1 (full noisy) | cnn-2d-v4-two-step.ipynb | 2 (0.6868 / 0.5085) | 2 (same) | ep12 (1.2279 / 0.4943) | +79% |
+| Two-step, Step 2 (clean finetune) | cnn-2d-v4-two-step.ipynb | 2 (0.4879 / 0.5317) | 6 (0.5148 / 0.5386) | ep12 (0.5514 / 0.5360) | +13.0% |
 
-**Interpretation**: the single-step full-noisy baseline (v3), and even
-Step1 of the two-step run (v4, which is architecturally identical
-single-step training on the same full data), both show the same
-failure mode as 1D's Step 2a: an early best-KL epoch followed by a
-noisy but net-rising val_kl. Two-step's Step2 (v4) is the
-best performer on both metrics of the three rows (lowest val_kl, highest
-best-F1-anchor macro_f1), and its post-optimum rise is far gentler
-(+13%) than the other two (+79% for v4 Step1 to +92% for v3) — but unlike 1D's Step 2c,
-it does **not** fully eliminate the divergence: the best-KL epoch is 2
-of 12, not the last epoch. The correct claim for 2D is therefore
-"two-step substantially reduces, but does not eliminate, the
-early-divergence failure mode" — a weaker but still directionally
-consistent version of the 1D finding. One candidate (untested)
-explanation for the weaker effect: v3/v4-Step1 both fine-tune the
-full pretrained EfficientNet-B0 at a constant `lr=1e-3` with a cosine
-schedule that has barely decayed by the early-stopping point (~epoch
-11-12 of a 50-epoch `T_max`), whereas 1D's v8/v8c use a markedly
-smaller Step2 LR (`1e-5`) than Step1 (`1e-3`). This was not re-tested
-for 2D — flagged here as a candidate explanation / future work, not a
-verified cause (see the v8b LR stress-test footnote above, which found
-raising Step2 LR did *not* help in 1D — the direction of any 2D LR
-effect is not assumed to be analogous).
+### 2D held-out non-clean test
+
+Definition: the rows of the full test split with fewer than 10 votes
+(n=14,863; median 3 votes; patient-disjoint from all training data; may
+share eeg_ids with the clean test rows). Evaluated with the best-val_kl
+checkpoint of each run:
+
+| condition | notebook | clean test KL / F1 | non-clean test KL / F1 |
+|---|---|---|---|
+| Full noisy | cnn-2d-v3 | 0.6402 / 0.4787 | 0.9763 / 0.5933 |
+| Clean-only | cnn-2d-v5 | 0.4794 / 0.5197 | 1.3325 / 0.5200 |
+| Clean + sampler | cnn-2d-v5b | 0.5131 / 0.4657 | 1.4594 / 0.4437 |
+| Two-step | cnn-2d-v4 | 0.4879 / 0.5317 | 1.0968 / 0.5230 |
+
+Reference KL on this set: clean-train prior 2.0521, full-train prior 1.5336, uniform 1.5621.
+
+Notes: non-clean labels are noisy, so absolute KL is not comparable with the clean-test column; F1 depends on class prevalence and must not be compared across the two test sets; every checkpoint was selected on the clean test, which does not optimize the non-clean number for any condition; single seed.
+
+**Interpretation**:
+(1) The ranking of conditions depends on the test set. Clean test: clean-only (0.4794) ~ two-step (0.4879) < clean+sampler (0.5131) < full noisy (0.6402). Non-clean test: full noisy (0.9763) < two-step (1.0968) < clean-only (1.3325) < clean+sampler (1.4594). The KL benefit of clean-only training on the clean test is therefore at least partly train/test distribution alignment (clean test is drawn from the clean subset; seizure share is 19.8% in full train, 4.1% in clean train, 5.3% in the clean test, 28.6% in the non-clean test).
+(2) Two-step is the only condition in the top two on both test sets. Versus clean-only: tie on the clean test (difference 0.0085, below the ~0.04 epoch-to-epoch SD of val_kl), better on the non-clean test (difference 0.236). Single seed, preliminary.
+(3) Reweighting does not improve KL on either test set (clean+sampler is worse than clean-only on both), and lowers macro-F1 in 2D.
+(4) The earlier statement that two-step "substantially reduces early divergence" in 2D is withdrawn. The like-for-like comparison for the finetune phase is clean-only (+18.6% best->last) versus two-step Step 2 (+13.0%), a small difference; the +79% to +92% figures belong to full-noisy training.
+(5) Candidate explanation about the Step 2 learning rate (1e-4 for 2D, a 10x reduction from Step 1) stays as untested.
 
 ## XGBoost — clean baseline / sample-weight
 
@@ -182,17 +205,18 @@ this ablation; only single-step (v3) vs. single-step + class-balanced
 |---|---|---|---|---|
 | Clean baseline | xgboost-v3-clean-data.ipynb | 0.8409 | 0.2002 | 49 |
 | + sample_weight (class-balanced) | xgboost-v4-sample-weight.ipynb | 0.8938 | 0.2676 | 232 |
+| Full noisy | xgboost-v5-full-noisy.ipynb | 0.9964 | 0.2782 | 132 |
 
 Per-class F1:
 
-| class | v3 | v4 |
-|---|---|---|
-| seizure | 0.1951 | 0.2913 |
-| lpd | 0.0581 | 0.1214 |
-| gpd | 0.2105 | 0.3741 |
-| lrda | 0.0000 | 0.0000 |
-| grda | 0.0611 | 0.1422 |
-| other | 0.6762 | 0.6768 |
+| class | v3 | v4 | v5 |
+|---|---|---|---|
+| seizure | 0.1951 | 0.2913 | 0.2768 |
+| lpd | 0.0581 | 0.1214 | 0.2420 |
+| gpd | 0.2105 | 0.3741 | 0.2314 |
+| lrda | 0.0000 | 0.0000 | 0.0964 |
+| grda | 0.0611 | 0.1422 | 0.2029 |
+| other | 0.6762 | 0.6768 | 0.6197 |
 
 **Interpretation**: `sample_weight` raises macro F1 substantially
 (+34% relative) with gains concentrated in minority classes (lpd, gpd,
@@ -203,11 +227,7 @@ EEGNet and EfficientNet-B0 for the CNNs) independently confirms that
 reweighting alone improves hard-classification accuracy at a real cost
 to soft-label calibration — consistent with, and sharper than, the 1D
 CNN's Step 2a→2b comparison (where KL was roughly flat rather than
-measurably worse). `lrda` scores exactly 0.0000 F1 in both conditions —
-reweighting could not recover this class at all, suggesting it may be
-unlearnable from this feature set at this data volume regardless of
-class weighting, worth a one-line mention as a limitation tied to the
-quality-filtering-causes-imbalance thesis.
+measurably worse). lrda scores 0.0000 F1 in both clean-only conditions but 0.0964 when training on the full noisy data (v5), so the failure is data-limited (4,800 rows) rather than a hard limit of the feature set.
 
 Note on curve shape: the `mlogloss` training curves for both XGBoost
 runs are smooth and well-behaved (monotonic-ish train/val convergence
@@ -220,14 +240,6 @@ dataset each round, while the CNN notebooks' `val_kl` targets a noisy
 both the loss target and the optimizer's stochasticity differ, and
 both plausibly contribute to the smoother XGBoost curves.
 
-## Pending runs (not yet executed)
+## Multi-seed status
 
-Five notebooks completing the Section 4 ablation matrix. No results yet.
-
-| notebook | condition | base notebook | single change |
-|---|---|---|---|
-| cnn-2d-v5-clean-data.ipynb | 2D, clean-only, single-step | cnn-2d-v3-efficientnet.ipynb | train on `load_clean_data(..., split='trainval')` (4,800 rows) instead of the full noisy trainval split |
-| cnn-2d-v5b-weighted-sampler.ipynb | 2D, clean + class-balanced sampler | cnn-2d-v5-clean-data.ipynb | `get_sampler(train_df, label_col='label')` + `DataLoader(sampler=...)` (no `shuffle`) |
-| cnn-1d-v7c-full-noisy.ipynb | 1D, full noisy data, single-step | cnn-1d-v7-clean-data.ipynb | train on `load_full_data(..., split='trainval')` (~83K rows) instead of the clean 4,800 rows |
-| cnn-1d-v7d-clean-lr1e-5.ipynb | 1D control: from scratch, clean-only, Step2-style optimization | cnn-1d-v7-clean-data.ipynb | local override `LR=1e-5`, `NUM_EPOCHS=30` (cosine `T_max=30`), `patience=15`; no pretraining |
-| xgboost-v5-full-noisy.ipynb | XGBoost, full noisy data | xgboost-v3-clean-data.ipynb | train on `load_full_data(..., split='trainval')` instead of the clean set (features extracted once per unique `eeg_id`) |
+Seeds 43 and 44 are pending for all rows above; results will be reported as mean +/- SD with per-seed values.
