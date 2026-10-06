@@ -82,20 +82,20 @@ moved (Step2 epochs ranged ~1.45–1.54, landing at 1.4925 on the epoch the old
 F1-based checkpoint criterion picked), while macro F1 degraded over the course
 of Step2 (peaked early at epoch 4, 0.2671, then trended down to ~0.24 by early
 stopping at epoch 19) rather than improving. Conclusion: raising Step2 LR by
-10x is not a promising direction — do not re-test this without new evidence.
+10x is not a promising direction — do not re-test this without new evidence. Caveat added after the v7d control: 1D KL is at prior level (see the 1D Interpretation), so this stress test carries little information about KL; only its F1 trend is informative.
 (v8b predates the checkpoint-selection bugfix in this doc's header, so its own
 printed "best f1" epoch is not directly comparable to the val_kl-selected rows
 above; the KL/F1 trend across its epochs is still informative.)
 
 
-## 1D CNN (EEGNet-style) — Step 2a/b/c/d
+## 1D CNN (EEGNet-style) — clean-only, reweighting, two-step, full-noisy, LR control
 
 Reporting a single "best val_kl" number is misleading here: from-scratch
 training on the 4,800-row clean subset (v7, v7b) shows val_kl bottom out
 within the first 1-2 epochs and then rise almost monotonically for the rest
 of training — there is no later, better-trained checkpoint to select instead.
 Two-step training (v8, v8c) shows the opposite pattern: val_kl in Step2
-improves gradually and continuously across all 30 epochs with no divergence.
+improves gradually and continuously across all 30 epochs with no divergence. The v7d control below reproduces this no-divergence pattern without any pretraining, so it is attributable to the small learning rate.
 
 Each row reports two anchors: the epoch with lowest val_kl, and the epoch
 with highest macro_f1 (often different epochs, since KL and F1 diverge).
@@ -133,8 +133,7 @@ low-vote samples, with progressively-reduced weight for lower-vote data
 the clean subset second. Do not describe this ablation as replicating
 Bhatti et al.'s method — it independently tests a different-order
 staged curriculum (the more standard "pretrain on large/noisy, finetune
-on small/clean" transfer-learning pattern) and finds a similar
-directional benefit. Also confirmed: Bhatti et al. do not report a
+on small/clean" transfer-learning pattern) and, at seed 42, finds no KL benefit over clean-only training on the clean test split (2D: 0.4879 vs 0.4794; 1D: 1.0826 vs 0.9215, both at or above the 0.8748 prior baseline), although two-step is better on the non-clean test split in 2D (see the 2D held-out non-clean test subsection). Also confirmed: Bhatti et al. do not report a
 controlled single-step + reweighting-only ablation against their
 two-stage approach for any one fixed architecture, and offer no
 mechanistic explanation for why two-stage training works (their paper
@@ -148,7 +147,7 @@ whether Bhatti et al.'s stage order is common among top solutions, not
 an isolated choice) before deciding whether it's worth a dedicated
 follow-up experiment.
 
-## 2D CNN (EfficientNet-B0) — single-step baseline / two-step
+## 2D CNN (EfficientNet-B0) — full-noisy, clean-only, reweighting, two-step
 
 Notebooks v3, v5, v5b and v4 are all scored on the same shared clean
 1,139-row test split used everywhere else in this ablation
@@ -192,9 +191,9 @@ Notes: non-clean labels are noisy, so absolute KL is not comparable with the cle
 (4) The earlier statement that two-step "substantially reduces early divergence" in 2D is withdrawn. The like-for-like comparison for the finetune phase is clean-only (+18.6% best->last) versus two-step Step 2 (+13.0%), a small difference; the +79% to +92% figures belong to full-noisy training.
 (5) Candidate explanation about the Step 2 learning rate (1e-4 for 2D, a 10x reduction from Step 1) stays as untested.
 
-## XGBoost — clean baseline / sample-weight
+## XGBoost — clean-only, sample-weight, full-noisy
 
-Both notebooks score against the same shared clean test split
+All three notebooks score against the same shared clean test split
 (`load_clean_data(CLEAN_PATH, split='test')`, 1,139 rows) used
 throughout this ablation — confirmed already consistent, no fix
 needed. Unlike the CNN notebooks, XGBoost has no two-step variant in
